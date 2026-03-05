@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZayZoon 2025 Audit — Project Kanban</title>
+    <style>
+        :root {
+            --bg: #f0f2f5;
+            --card-bg: #ffffff;
+            --header-bg: #1a1a2e;
+            --text: #212529;
+            --text-sec: #6c757d;
+            --text-on-dark: #ffffff;
+            --border: #dee2e6;
+            --col-not-started: #6c757d;
+            --col-in-progress: #0d6efd;
+            --col-uploaded: #fd7e14;
+            --col-review: #6f42c1;
+            --col-done: #198754;
+            --radius: 10px;
+            --gap: 14px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); }
+
+        .app-header {
+            background: var(--header-bg);
+            color: var(--text-on-dark);
+            padding: 18px 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .app-header h1 { font-size: 20px; font-weight: 700; }
+        .app-header .subtitle { font-size: 13px; opacity: .7; margin-top: 2px; }
+
+        .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .controls label { font-size: 12px; color: rgba(255,255,255,.6); }
+        .controls select, .controls input {
+            padding: 6px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 6px;
+            background: rgba(255,255,255,.1); color: #fff; font-size: 13px; outline: none;
+        }
+        .controls select option { background: #1a1a2e; }
+        .controls input::placeholder { color: rgba(255,255,255,.4); }
+
+        .kpi-row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: var(--gap);
+            padding: var(--gap) 28px;
+        }
+        .kpi-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.06);
+            border-top: 4px solid var(--col-not-started);
+            text-align: center;
+        }
+        .kpi-card.not-started { border-top-color: var(--col-not-started); }
+        .kpi-card.in-progress { border-top-color: var(--col-in-progress); }
+        .kpi-card.uploaded { border-top-color: var(--col-uploaded); }
+        .kpi-card.review { border-top-color: var(--col-review); }
+        .kpi-card.done { border-top-color: var(--col-done); }
+        .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-sec); margin-bottom: 4px; }
+        .kpi-value { font-size: 32px; font-weight: 800; }
+        .kpi-card.not-started .kpi-value { color: var(--col-not-started); }
+        .kpi-card.in-progress .kpi-value { color: var(--col-in-progress); }
+        .kpi-card.uploaded .kpi-value { color: var(--col-uploaded); }
+        .kpi-card.review .kpi-value { color: var(--col-review); }
+        .kpi-card.done .kpi-value { color: var(--col-done); }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: var(--gap);
+            padding: 0 28px 28px;
+            align-items: start;
+        }
+        .column {
+            background: #e9ecef;
+            border-radius: var(--radius);
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+        }
+        .column-header {
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            color: #fff;
+            border-radius: var(--radius) var(--radius) 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .column-header .count {
+            background: rgba(255,255,255,.25);
+            padding: 2px 9px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        .col-not-started .column-header { background: var(--col-not-started); }
+        .col-in-progress .column-header { background: var(--col-in-progress); }
+        .col-uploaded .column-header { background: var(--col-uploaded); }
+        .col-review .column-header { background: var(--col-review); }
+        .col-done .column-header { background: var(--col-done); }
+
+        .column-body {
+            padding: 10px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+            max-height: calc(100vh - 280px);
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08);
+            cursor: grab;
+            transition: box-shadow .15s, transform .15s;
+            position: relative;
+        }
+        .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.12); transform: translateY(-1px); }
+        .card.dragging { opacity: .5; }
+        .card-id { font-size: 11px; color: var(--text-sec); margin-bottom: 4px; }
+        .card-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; line-height: 1.4; }
+        .card-meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+        .card-owner {
+            font-size: 11px;
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 10px;
+            color: var(--text-sec);
+        }
+        .card-category {
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 10px;
+            background: #dbeafe;
+            color: #1e40af;
+            font-weight: 600;
+        }
+        .card-deadline {
+            font-size: 11px;
+            color: var(--text-sec);
+        }
+        .card-deadline.overdue { color: #dc3545; font-weight: 600; }
+        .card-deadline.due-soon { color: #fd7e14; font-weight: 600; }
+
+        .card-notes-toggle {
+            font-size: 11px;
+            color: var(--col-in-progress);
+            cursor: pointer;
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            user-select: none;
+        }
+        .card-notes-toggle:hover { text-decoration: underline; }
+        .card-notes-toggle .note-icon { font-size: 13px; }
+        .card-notes-toggle .note-count {
+            background: var(--col-in-progress);
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 8px;
+            margin-left: 2px;
+        }
+
+        .card-notes-area {
+            margin-top: 8px;
+            display: none;
+        }
+        .card-notes-area.open { display: block; }
+        .card-notes-area textarea {
+            width: 100%;
+            min-height: 52px;
+            padding: 8px 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text);
+            background: #f8f9fa;
+            resize: vertical;
+            outline: none;
+            transition: border-color .15s, background .15s;
+        }
+        .card-notes-area textarea:focus {
+            border-color: var(--col-in-progress);
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(13,110,253,.08);
+        }
+        .card-notes-area textarea::placeholder { color: #adb5bd; }
+        .card-notes-saved {
+            font-size: 10px;
+            color: var(--col-done);
+            margin-top: 3px;
+            opacity: 0;
+            transition: opacity .3s;
+        }
+        .card-notes-saved.show { opacity: 1; }
+
+        .card-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+            align-items: center;
+        }
+        .btn-ping {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #fff;
+            background: #4A154B;
+            border: none;
+            border-radius: 6px;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: background .15s, transform .1s;
+            text-decoration: none;
+        }
+        .btn-ping:hover { background: #611f69; transform: translateY(-1px); }
+        .btn-ping:active { transform: translateY(0); }
+        .btn-ping .slack-icon { font-size: 13px; }
+        .btn-ping.pinged {
+            background: var(--col-done);
+            pointer-events: none;
+        }
+
+        .ping-toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #4A154B;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 500;
+            box-shadow: 0 4px 16px rgba(0,0,0,.2);
+            z-index: 999;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity .3s, transform .3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .ping-toast.show { opacity: 1; transform: translateY(0); }
+
+        .drop-zone {
+            min-height: 60px;
+            border: 2px dashed transparent;
+            border-radius: 8px;
+            transition: border-color .2s, background .2s;
+        }
+        .drop-zone.drag-over {
+            border-color: #0d6efd;
+            background: rgba(13,110,253,.06);
+        }
+
+        .progress-bar-container {
+            padding: 0 28px 8px;
+        }
+        .progress-bar-bg {
+            height: 8px;
+            background: #dee2e6;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--col-done), #20c997);
+            border-radius: 4px;
+            transition: width .4s ease;
+        }
+        .progress-text {
+            font-size: 12px;
+            color: var(--text-sec);
+            text-align: right;
+            margin-top: 4px;
+        }
+
+        @media (max-width: 1100px) {
+            .board { grid-template-columns: repeat(3, 1fr); }
+            .kpi-row { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 700px) {
+            .board { grid-template-columns: 1fr; }
+            .kpi-row { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media print {
+            .controls { display: none; }
+            .board { grid-template-columns: repeat(5, 1fr); }
+            .column-body { max-height: none; overflow: visible; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="app-header">
+    <div>
+        <h1>ZayZoon Inc. — 2025 Year-End Audit</h1>
+        <div class="subtitle">Audit Request Kanban Board &bull; Drag cards to update status</div>
+    </div>
+    <div class="controls">
+        <div>
+            <label>Due Date</label><br>
+            <select id="filterDue" onchange="render()">
+                <option value="all">All Dates</option>
+                <option value="overdue">Overdue</option>
+                <option value="today">Due Today</option>
+                <option value="this-week">This Week</option>
+                <option value="next-week">Next Week</option>
+                <option value="this-month">This Month</option>
+            </select>
+        </div>
+        <div>
+            <label>Owner</label><br>
+            <select id="filterOwner" onchange="render()"><option value="all">All Owners</option></select>
+        </div>
+        <div>
+            <label>Category</label><br>
+            <select id="filterCat" onchange="render()"><option value="all">All Categories</option></select>
+        </div>
+        <div>
+            <label>Search</label><br>
+            <input type="text" id="searchBox" placeholder="Search items..." oninput="render()">
+        </div>
+    </div>
+</header>
+
+<div class="progress-bar-container">
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText"></div>
+</div>
+
+<section class="kpi-row">
+    <div class="kpi-card not-started"><div class="kpi-label">Not Started</div><div class="kpi-value" id="kpiNS">0</div></div>
+    <div class="kpi-card in-progress"><div class="kpi-label">In Progress</div><div class="kpi-value" id="kpiIP">0</div></div>
+    <div class="kpi-card review"><div class="kpi-label">Under Review</div><div class="kpi-value" id="kpiUR">0</div></div>
+    <div class="kpi-card uploaded"><div class="kpi-label">Uploaded to Clara</div><div class="kpi-value" id="kpiUC">0</div></div>
+    <div class="kpi-card done"><div class="kpi-label">Done</div><div class="kpi-value" id="kpiDN">0</div></div>
+</section>
+
+<section class="board" id="board"></section>
+
+<script>
+const STATUSES = ['Not Started','In Progress','Under Review','Uploaded to Clara','Done'];
+const STATUS_CLASSES = ['col-not-started','col-in-progress','col-review','col-uploaded','col-done'];
+
+const TASKS = [
+    {id:1, title:"Post YE bank statements", category:"Accounts Payable", owner:"Tony", due:"2026-04-03", status:"Not Started"},
+    {id:2, title:"AP subledger", category:"Accounts Payable", owner:"Tony", due:"2026-04-03", status:"Not Started"},
+    {id:3, title:"Unposted invoices", category:"Accounts Payable", owner:"Tony", due:"2026-04-03", status:"Not Started"},
+    {id:4, title:"Leases", category:"Business Processes", owner:"Tony", due:"2026-03-20", status:"Not Started"},
+    {id:5, title:"Bank reconciliations", category:"Cash", owner:"Agnes", due:"2026-03-19", status:"Not Started"},
+    {id:6, title:"Bank statements", category:"Cash", owner:"Agnes", due:"2026-03-19", status:"Not Started"},
+    {id:7, title:"GIC Support", category:"Cash", owner:"Tony", due:"2026-03-19", status:"Not Started"},
+    {id:8, title:"Bank Confirmations", category:"Cash", owner:"Tony", due:"2026-03-19", status:"Not Started"},
+    {id:9, title:"Bank TOE request", category:"Cash", owner:"Tray", due:"2026-03-26", status:"Not Started"},
+    {id:10, title:"GIC Documents", category:"Cash", owner:"Unassigned", due:"2026-03-18", status:"Not Started"},
+    {id:11, title:"PNC Recs", category:"Cash", owner:"Tray", due:"2026-03-19", status:"Not Started"},
+    {id:12, title:"Reconciling Listings", category:"Cash", owner:"Tray", due:"2026-03-19", status:"Not Started"},
+    {id:13, title:"Contributed surplus", category:"Equity", owner:"Pan Hu", due:"2026-03-16", status:"Not Started"},
+    {id:14, title:"EPS", category:"Equity", owner:"Kathy Xu", due:"2026-03-16", status:"Not Started"},
+    {id:15, title:"Equity Continuity", category:"Equity", owner:"Pan Hu", due:"2026-03-16", status:"Not Started"},
+    {id:16, title:"SBC", category:"Equity", owner:"Kathy Xu", due:"2026-03-16", status:"Not Started"},
+    {id:17, title:"Valuation report", category:"Equity", owner:"Kathy Xu", due:"2026-03-16", status:"Not Started"},
+    {id:18, title:"Equity Confirmations", category:"Equity", owner:"Kathy Xu", due:"2026-03-16", status:"Not Started"},
+    {id:19, title:"Partner Revenue Share", category:"Financial reporting", owner:"Agnes", due:"2026-03-13", status:"Not Started"},
+    {id:20, title:"SOC report", category:"Financial reporting", owner:"Tony", due:"2026-03-13", status:"Not Started"},
+    {id:21, title:"MSA", category:"Financial reporting", owner:"Kathy Xu", due:"2026-03-13", status:"Not Started"},
+    {id:22, title:"Tax Process Support", category:"Financial reporting", owner:"Michelle Rorquist", due:"2026-03-18", status:"Not Started"},
+    {id:23, title:"Draft FS", category:"Financial Statements", owner:"Kathy Xu", due:"2026-03-06", status:"Not Started"},
+    {id:24, title:"FSN supports", category:"Financial Statements", owner:"Kathy Xu", due:"2026-03-06", status:"Not Started"},
+    {id:25, title:"Cash flow proof", category:"Financial Statements", owner:"Kathy Xu", due:"2026-03-06", status:"Not Started"},
+    {id:26, title:"FX proof", category:"Financial Statements", owner:"Kathy Xu", due:"2026-03-06", status:"Not Started"},
+    {id:27, title:"Consolidated TB", category:"Financial Statements", owner:"Kathy Xu", due:"2026-03-06", status:"Not Started"},
+    {id:28, title:"G&A Samples", category:"Financial Statements", owner:"Tony", due:"2026-03-23", status:"Not Started"},
+    {id:29, title:"Customer Complaint Log", category:"Legal", owner:"Kathy Xu", due:"2026-03-23", status:"Not Started"},
+    {id:30, title:"JE Completeness", category:"Financial Statements", owner:"Tony", due:"2026-03-06", status:"Not Started"},
+    {id:31, title:"Payroll Contract Support", category:"HR", owner:"Andie", due:"2026-03-18", status:"Not Started"},
+    {id:32, title:"Intangible Continuity", category:"Intangible assets", owner:"Tony", due:"2026-03-20", status:"Not Started"},
+    {id:33, title:"Intangibles amortization", category:"Intangible assets", owner:"Tony", due:"2026-03-20", status:"Not Started"},
+    {id:34, title:"Lawyer Confirmations", category:"Legal", owner:"Garth", due:"2026-04-22", status:"Not Started"},
+    {id:35, title:"Loan covenants", category:"Loan", owner:"Kathy Xu", due:"2026-03-11", status:"Not Started"},
+    {id:36, title:"Interest charges calc", category:"Loan", owner:"Tony", due:"2026-03-11", status:"Not Started"},
+    {id:37, title:"Common Shares Agreement", category:"Equity", owner:"Garth", due:"2026-03-24", status:"Not Started"},
+    {id:38, title:"2025 Prepayment Schedule", category:"MNSA", owner:"Tony", due:"2026-03-20", status:"Not Started"},
+    {id:39, title:"New Leasing Agreement", category:"MNSA", owner:"Tony", due:"2026-03-20", status:"Not Started"},
+    {id:40, title:"Related parties", category:"Planning", owner:"Tony", due:"2026-03-10", status:"Not Started"},
+    {id:41, title:"Minutes of meetings", category:"Planning", owner:"Garth", due:"2026-03-10", status:"Not Started"},
+    {id:42, title:"Regulatory authorities", category:"Planning", owner:"Garth", due:"2026-03-10", status:"Not Started"},
+    {id:43, title:"Budget", category:"Planning", owner:"Kathy Xu", due:"2026-03-10", status:"Not Started"},
+    {id:44, title:"Advance receivable", category:"Receivable", owner:"Tray", due:"2026-03-13", status:"Not Started"},
+    {id:45, title:"ECL docs", category:"Receivable", owner:"Tray", due:"2026-03-13", status:"Not Started"},
+    {id:46, title:"Actual receipt dates", category:"Receivable", owner:"Tray", due:"2026-03-13", status:"Not Started"},
+    {id:47, title:"Customer AR Testing", category:"Receivable", owner:"Tray", due:"2026-03-18", status:"Not Started"},
+    {id:48, title:"Intercheck Reports", category:"Revenue", owner:"Kathy Xu", due:"2026-03-17", status:"Not Started"},
+    {id:49, title:"Partner Revenue Share Confirmations", category:"Revenue", owner:"Agnes", due:"2026-03-18", status:"Not Started"},
+    {id:50, title:"Advance listing", category:"Revenue", owner:"Tray", due:"2026-03-18", status:"Not Started"},
+    {id:51, title:"PRS sample Invoice support", category:"Revenue", owner:"Kathy Xu", due:"2026-03-18", status:"Not Started"},
+    {id:52, title:"PNC report", category:"Revenue", owner:"Agnes", due:"2026-03-17", status:"Not Started"},
+];
+
+// Slack integration
+const SLACK_CHANNEL_ID = 'C0AK889Q1NU';
+const SLACK_CHANNEL_NAME = '2025-year-end-audit';
+const SLACK_USER_IDS = {
+    'Tony': 'U057DMZKK0C',
+    'Agnes': 'U02BT9GEB8B',
+    'Tray': 'U08QAV62TRD',
+    'Pan Hu': 'U09AD6HJYE9',
+    'Kathy Xu': 'U05AS678C8Y',
+    'Garth': 'U51A7EBJ7',
+    'Andie': 'U082NBUQJJZ',
+    'Michelle Rorquist': null,
+    'Unassigned': null,
+};
+
+function getSlackMention(owner) {
+    const uid = SLACK_USER_IDS[owner];
+    return uid ? `<@${uid}>` : owner;
+}
+
+function buildSlackMessage(task) {
+    const mention = getSlackMention(task.owner);
+    const dueDate = formatDate(task.due);
+    const dlClass = deadlineClass(task.due);
+    const urgency = dlClass === 'overdue' ? ' (OVERDUE)' : dlClass === 'due-soon' ? ' (due soon)' : '';
+    return `Hi ${mention}, friendly reminder on *${task.title}* [${task.category}] — due *${dueDate}*${urgency}. Please update when ready.`;
+}
+
+function openSlackChannel(task) {
+    const msg = buildSlackMessage(task);
+    // Copy message to clipboard
+    navigator.clipboard.writeText(msg).catch(() => {});
+    // Open Slack to the channel
+    window.open(`https://slack.com/app_redirect?channel=${SLACK_CHANNEL_ID}`, '_blank');
+    showToast(`Message copied — paste it in #${SLACK_CHANNEL_NAME}`);
+}
+
+function showToast(text) {
+    let toast = document.getElementById('pingToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'pingToast';
+        toast.className = 'ping-toast';
+        document.body.appendChild(toast);
+    }
+    toast.innerHTML = `<span class="slack-icon">💬</span> ${text}`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3500);
+}
+
+// Persist status + notes to localStorage
+const STORAGE_KEY = 'zayzoon_audit_kanban_v2';
+const NOTES_KEY = 'zayzoon_audit_kanban_notes_v2';
+
+let notes = {}; // {taskId: "note text"}
+
+function loadState() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (saved) saved.forEach(s => { const t = TASKS.find(x => x.id === s.id); if (t) t.status = s.status; });
+    } catch(e) {}
+    try {
+        const savedNotes = JSON.parse(localStorage.getItem(NOTES_KEY));
+        if (savedNotes) notes = savedNotes;
+    } catch(e) {}
+}
+function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(TASKS.map(t => ({id: t.id, status: t.status}))));
+}
+function saveNotes() {
+    localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+}
+loadState();
+
+function populateFilters() {
+    const owners = [...new Set(TASKS.map(t => t.owner))].sort();
+    const cats = [...new Set(TASKS.map(t => t.category))].sort();
+    const oSel = document.getElementById('filterOwner');
+    const cSel = document.getElementById('filterCat');
+    owners.forEach(o => { const opt = document.createElement('option'); opt.value = o; opt.textContent = o; oSel.appendChild(opt); });
+    cats.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; cSel.appendChild(opt); });
+}
+
+function getFiltered() {
+    const dueFilter = document.getElementById('filterDue').value;
+    const owner = document.getElementById('filterOwner').value;
+    const cat = document.getElementById('filterCat').value;
+    const q = document.getElementById('searchBox').value.toLowerCase();
+
+    const today = new Date(); today.setHours(0,0,0,0);
+    const todayEnd = new Date(today); todayEnd.setHours(23,59,59,999);
+    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + (7 - weekEnd.getDay()));
+    weekEnd.setHours(23,59,59,999);
+    const nextWeekStart = new Date(weekEnd); nextWeekStart.setDate(nextWeekStart.getDate() + 1);
+    nextWeekStart.setHours(0,0,0,0);
+    const nextWeekEnd = new Date(nextWeekStart); nextWeekEnd.setDate(nextWeekEnd.getDate() + 6);
+    nextWeekEnd.setHours(23,59,59,999);
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    return TASKS.filter(t => {
+        if (dueFilter !== 'all') {
+            const d = new Date(t.due + 'T00:00:00');
+            if (dueFilter === 'overdue' && d >= today) return false;
+            if (dueFilter === 'today' && (d < today || d > todayEnd)) return false;
+            if (dueFilter === 'this-week' && (d < today || d > weekEnd)) return false;
+            if (dueFilter === 'next-week' && (d < nextWeekStart || d > nextWeekEnd)) return false;
+            if (dueFilter === 'this-month' && (d < today || d > monthEnd)) return false;
+        }
+        if (owner !== 'all' && t.owner !== owner) return false;
+        if (cat !== 'all' && t.category !== cat) return false;
+        const taskNote = (notes[t.id] || '').toLowerCase();
+        if (q && !t.title.toLowerCase().includes(q) && !t.category.toLowerCase().includes(q) && !t.owner.toLowerCase().includes(q) && !taskNote.includes(q)) return false;
+        return true;
+    });
+}
+
+function deadlineClass(due) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const d = new Date(due + 'T00:00:00');
+    const diff = (d - today) / 86400000;
+    if (diff < 0) return 'overdue';
+    if (diff <= 3) return 'due-soon';
+    return '';
+}
+
+function formatDate(d) {
+    const dt = new Date(d + 'T00:00:00');
+    return dt.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+}
+
+let draggedId = null;
+
+function render() {
+    const filtered = getFiltered();
+    const board = document.getElementById('board');
+    board.innerHTML = '';
+
+    const counts = {};
+    STATUSES.forEach(s => counts[s] = 0);
+    // Count ALL tasks (not just filtered) for KPIs
+    TASKS.forEach(t => counts[t.status]++);
+
+    document.getElementById('kpiNS').textContent = counts['Not Started'];
+    document.getElementById('kpiIP').textContent = counts['In Progress'];
+    document.getElementById('kpiUC').textContent = counts['Uploaded to Clara'];
+    document.getElementById('kpiUR').textContent = counts['Under Review'];
+    document.getElementById('kpiDN').textContent = counts['Done'];
+
+    const total = TASKS.length;
+    const donePct = total ? Math.round((counts['Done'] / total) * 100) : 0;
+    document.getElementById('progressFill').style.width = donePct + '%';
+    document.getElementById('progressText').textContent = `${counts['Done']} of ${total} complete (${donePct}%)`;
+
+    STATUSES.forEach((status, i) => {
+        const col = document.createElement('div');
+        col.className = `column ${STATUS_CLASSES[i]}`;
+
+        const colFiltered = filtered.filter(t => t.status === status);
+
+        col.innerHTML = `<div class="column-header"><span>${status}</span><span class="count">${colFiltered.length}</span></div>`;
+        const body = document.createElement('div');
+        body.className = 'column-body drop-zone';
+        body.dataset.status = status;
+
+        body.addEventListener('dragover', e => { e.preventDefault(); body.classList.add('drag-over'); });
+        body.addEventListener('dragleave', () => body.classList.remove('drag-over'));
+        body.addEventListener('drop', e => {
+            e.preventDefault();
+            body.classList.remove('drag-over');
+            if (draggedId !== null) {
+                const task = TASKS.find(t => t.id === draggedId);
+                if (task) { task.status = status; saveState(); render(); }
+            }
+        });
+
+        colFiltered.forEach(task => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.draggable = true;
+            card.dataset.id = task.id;
+            const dlClass = task.status === 'Done' ? '' : deadlineClass(task.due);
+            const taskNote = notes[task.id] || '';
+            const hasNote = taskNote.trim().length > 0;
+            const noteLines = taskNote.trim().split('\n').filter(l => l.trim()).length;
+
+            const hasSlack = SLACK_USER_IDS[task.owner] !== null && SLACK_USER_IDS[task.owner] !== undefined;
+
+            card.innerHTML = `
+                <div class="card-id">#${task.id}</div>
+                <div class="card-title">${task.title}</div>
+                <div class="card-meta">
+                    <span class="card-category">${task.category}</span>
+                    <span class="card-owner">${task.owner}</span>
+                </div>
+                <div class="card-meta" style="margin-top:6px;">
+                    <span class="card-deadline ${dlClass}">${dlClass === 'overdue' ? '⚠ ' : ''}${formatDate(task.due)}</span>
+                </div>
+                <div class="card-actions">
+                    ${hasSlack ? `<button class="btn-ping" data-ping="${task.id}" title="Ping ${task.owner} in #${SLACK_CHANNEL_NAME}"><span class="slack-icon">💬</span> Ping</button>` : ''}
+                    <div class="card-notes-toggle" data-toggle="${task.id}" style="margin-top:0;">
+                        <span class="note-icon">${hasNote ? '📝' : '📋'}</span>
+                        <span>${hasNote ? 'Notes' : 'Add note'}</span>
+                        ${hasNote ? `<span class="note-count">${noteLines}</span>` : ''}
+                    </div>
+                </div>
+                <div class="card-notes-area" id="notes-area-${task.id}">
+                    <textarea
+                        id="notes-input-${task.id}"
+                        placeholder="Type notes here..."
+                        data-task-id="${task.id}"
+                    >${taskNote}</textarea>
+                    <div class="card-notes-saved" id="notes-saved-${task.id}">Saved</div>
+                </div>
+            `;
+
+            // Ping button
+            const pingBtn = card.querySelector(`[data-ping="${task.id}"]`);
+            if (pingBtn) {
+                pingBtn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openSlackChannel(task);
+                });
+            }
+
+            // Toggle notes
+            card.querySelector(`[data-toggle="${task.id}"]`).addEventListener('click', e => {
+                e.stopPropagation();
+                const area = document.getElementById(`notes-area-${task.id}`);
+                area.classList.toggle('open');
+                if (area.classList.contains('open')) {
+                    const ta = document.getElementById(`notes-input-${task.id}`);
+                    ta.focus();
+                }
+            });
+
+            // Notes input — save on every keystroke with debounce
+            card.addEventListener('dragstart', e => {
+                // Don't allow drag when editing notes
+                const active = document.activeElement;
+                if (active && active.tagName === 'TEXTAREA') { e.preventDefault(); return; }
+                draggedId = task.id; card.classList.add('dragging');
+            });
+            card.addEventListener('dragend', () => { draggedId = null; card.classList.remove('dragging'); });
+
+            body.appendChild(card);
+
+            // Attach note save handler after appended to DOM
+            const textarea = card.querySelector(`#notes-input-${task.id}`);
+            let saveTimer = null;
+            textarea.addEventListener('input', () => {
+                clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => {
+                    notes[task.id] = textarea.value;
+                    saveNotes();
+                    const savedEl = document.getElementById(`notes-saved-${task.id}`);
+                    savedEl.classList.add('show');
+                    setTimeout(() => savedEl.classList.remove('show'), 1500);
+                    // Update the toggle label
+                    const toggle = card.querySelector(`[data-toggle="${task.id}"]`);
+                    const hasN = textarea.value.trim().length > 0;
+                    const nLines = textarea.value.trim().split('\n').filter(l => l.trim()).length;
+                    toggle.innerHTML = `
+                        <span class="note-icon">${hasN ? '📝' : '📋'}</span>
+                        <span>${hasN ? 'Notes' : 'Add note'}</span>
+                        ${hasN ? `<span class="note-count">${nLines}</span>` : ''}
+                    `;
+                }, 400);
+            });
+            // Prevent drag while typing
+            textarea.addEventListener('mousedown', e => e.stopPropagation());
+        });
+
+        col.appendChild(body);
+        board.appendChild(col);
+    });
+}
+
+populateFilters();
+render();
+</script>
+</body>
+</html>
