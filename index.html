@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZayZoon 2025 Audit — Project Kanban</title>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
     <style>
         :root {
             --bg: #f0f2f5;
@@ -39,6 +42,25 @@
         }
         .app-header h1 { font-size: 20px; font-weight: 700; }
         .app-header .subtitle { font-size: 13px; opacity: .7; margin-top: 2px; }
+        .sync-status {
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: rgba(255,255,255,.15);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .sync-status.connected { background: rgba(25, 135, 84, .3); }
+        .sync-status.disconnected { background: rgba(220, 53, 69, .3); }
+        .sync-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ffc107;
+        }
+        .sync-status.connected .sync-dot { background: #198754; }
+        .sync-status.disconnected .sync-dot { background: #dc3545; }
 
         .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         .controls label { font-size: 12px; color: rgba(255,255,255,.6); }
@@ -320,7 +342,11 @@
 <header class="app-header">
     <div>
         <h1>ZayZoon Inc. — 2025 Year-End Audit</h1>
-        <div class="subtitle">Audit Request Kanban Board &bull; Drag cards to update status</div>
+        <div class="subtitle">Audit Request Kanban Board • Drag cards to update status • <strong>Real-time sync enabled</strong> 🔥</div>
+    </div>
+    <div class="sync-status" id="syncStatus">
+        <span class="sync-dot"></span>
+        <span id="syncText">Connecting...</span>
     </div>
     <div class="controls">
         <div>
@@ -365,10 +391,31 @@
 <section class="board" id="board"></section>
 
 <script>
+// ============================================
+// FIREBASE CONFIGURATION
+// ============================================
+const firebaseConfig = {
+    apiKey: "AIzaSyCdLxVeLaMvCEiyXrM9X8Bz-veRvYzdAho",
+    authDomain: "zayzoon-audit-kanban.firebaseapp.com",
+    databaseURL: "https://zayzoon-audit-kanban-default-rtdb.firebaseio.com",
+    projectId: "zayzoon-audit-kanban",
+    storageBucket: "zayzoon-audit-kanban.firebasestorage.app",
+    messagingSenderId: "1064890850375",
+    appId: "1:1064890850375:web:1c78ba698c2c9a54c0e562"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// ============================================
+// CONSTANTS
+// ============================================
 const STATUSES = ['Not Started','In Progress','Under Review','Uploaded to Clara','Done'];
 const STATUS_CLASSES = ['col-not-started','col-in-progress','col-review','col-uploaded','col-done'];
 
-const TASKS = [
+// Initial tasks (used to seed Firebase if empty)
+const INITIAL_TASKS = [
     {id:1, title:"Post YE bank statements", category:"Accounts Payable", owner:"Tony", due:"2026-04-03", status:"Not Started"},
     {id:2, title:"AP subledger", category:"Accounts Payable", owner:"Tony", due:"2026-04-03", status:"Not Started"},
     {id:3, title:"Unposted invoices", category:"Accounts Payable", owner:"Tony", due:"2026-04-03", status:"Not Started"},
@@ -438,6 +485,76 @@ const SLACK_USER_IDS = {
     'Unassigned': null,
 };
 
+// ============================================
+// STATE
+// ============================================
+let TASKS = [];
+let notes = {};
+let draggedId = null;
+
+// ============================================
+// FIREBASE SYNC
+// ============================================
+function updateSyncStatus(connected) {
+    const el = document.getElementById('syncStatus');
+    const text = document.getElementById('syncText');
+    if (connected) {
+        el.className = 'sync-status connected';
+        text.textContent = 'Synced';
+    } else {
+        el.className = 'sync-status disconnected';
+        text.textContent = 'Offline';
+    }
+}
+
+// Monitor connection state
+db.ref('.info/connected').on('value', (snap) => {
+    updateSyncStatus(snap.val() === true);
+});
+
+// Load tasks from Firebase (or seed if empty)
+function loadFromFirebase() {
+    db.ref('tasks').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            TASKS = Object.values(data);
+        } else {
+            // First time: seed with initial tasks
+            seedFirebase();
+            return;
+        }
+        populateFilters();
+        render();
+    });
+
+    db.ref('notes').on('value', (snapshot) => {
+        notes = snapshot.val() || {};
+        render();
+    });
+}
+
+function seedFirebase() {
+    const tasksObj = {};
+    INITIAL_TASKS.forEach(t => {
+        tasksObj[t.id] = t;
+    });
+    db.ref('tasks').set(tasksObj);
+    TASKS = INITIAL_TASKS;
+    populateFilters();
+    render();
+}
+
+function saveTaskStatus(taskId, newStatus) {
+    db.ref(`tasks/${taskId}/status`).set(newStatus);
+}
+
+function saveNote(taskId, noteText) {
+    db.ref(`notes/${taskId}`).set(noteText);
+}
+
+// ============================================
+// SLACK INTEGRATION
+// ============================================
 function getSlackMention(owner) {
     const uid = SLACK_USER_IDS[owner];
     return uid ? `<@${uid}>` : owner;
@@ -453,9 +570,7 @@ function buildSlackMessage(task) {
 
 function openSlackChannel(task) {
     const msg = buildSlackMessage(task);
-    // Copy message to clipboard
     navigator.clipboard.writeText(msg).catch(() => {});
-    // Open Slack to the channel
     window.open(`https://slack.com/app_redirect?channel=${SLACK_CHANNEL_ID}`, '_blank');
     showToast(`Message copied — paste it in #${SLACK_CHANNEL_NAME}`);
 }
@@ -473,35 +588,19 @@ function showToast(text) {
     setTimeout(() => toast.classList.remove('show'), 3500);
 }
 
-// Persist status + notes to localStorage
-const STORAGE_KEY = 'zayzoon_audit_kanban_v2';
-const NOTES_KEY = 'zayzoon_audit_kanban_notes_v2';
-
-let notes = {}; // {taskId: "note text"}
-
-function loadState() {
-    try {
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-        if (saved) saved.forEach(s => { const t = TASKS.find(x => x.id === s.id); if (t) t.status = s.status; });
-    } catch(e) {}
-    try {
-        const savedNotes = JSON.parse(localStorage.getItem(NOTES_KEY));
-        if (savedNotes) notes = savedNotes;
-    } catch(e) {}
-}
-function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(TASKS.map(t => ({id: t.id, status: t.status}))));
-}
-function saveNotes() {
-    localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
-}
-loadState();
-
+// ============================================
+// FILTERS & RENDERING
+// ============================================
 function populateFilters() {
     const owners = [...new Set(TASKS.map(t => t.owner))].sort();
     const cats = [...new Set(TASKS.map(t => t.category))].sort();
     const oSel = document.getElementById('filterOwner');
     const cSel = document.getElementById('filterCat');
+    
+    // Clear existing options except first
+    oSel.innerHTML = '<option value="all">All Owners</option>';
+    cSel.innerHTML = '<option value="all">All Categories</option>';
+    
     owners.forEach(o => { const opt = document.createElement('option'); opt.value = o; opt.textContent = o; oSel.appendChild(opt); });
     cats.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; cSel.appendChild(opt); });
 }
@@ -553,8 +652,6 @@ function formatDate(d) {
     return dt.toLocaleDateString('en-US', {month:'short', day:'numeric'});
 }
 
-let draggedId = null;
-
 function render() {
     const filtered = getFiltered();
     const board = document.getElementById('board');
@@ -562,7 +659,6 @@ function render() {
 
     const counts = {};
     STATUSES.forEach(s => counts[s] = 0);
-    // Count ALL tasks (not just filtered) for KPIs
     TASKS.forEach(t => counts[t.status]++);
 
     document.getElementById('kpiNS').textContent = counts['Not Started'];
@@ -594,7 +690,11 @@ function render() {
             body.classList.remove('drag-over');
             if (draggedId !== null) {
                 const task = TASKS.find(t => t.id === draggedId);
-                if (task) { task.status = status; saveState(); render(); }
+                if (task && task.status !== status) {
+                    task.status = status;
+                    saveTaskStatus(draggedId, status);
+                    render();
+                }
             }
         });
 
@@ -634,7 +734,7 @@ function render() {
                         placeholder="Type notes here..."
                         data-task-id="${task.id}"
                     >${taskNote}</textarea>
-                    <div class="card-notes-saved" id="notes-saved-${task.id}">Saved</div>
+                    <div class="card-notes-saved" id="notes-saved-${task.id}">Saved ✓</div>
                 </div>
             `;
 
@@ -647,61 +747,59 @@ function render() {
                 });
             }
 
-            // Toggle notes
-            card.querySelector(`[data-toggle="${task.id}"]`).addEventListener('click', e => {
+            // Notes toggle
+            const notesToggle = card.querySelector(`[data-toggle="${task.id}"]`);
+            notesToggle.addEventListener('click', e => {
                 e.stopPropagation();
                 const area = document.getElementById(`notes-area-${task.id}`);
                 area.classList.toggle('open');
                 if (area.classList.contains('open')) {
-                    const ta = document.getElementById(`notes-input-${task.id}`);
-                    ta.focus();
+                    document.getElementById(`notes-input-${task.id}`).focus();
                 }
             });
 
-            // Notes input — save on every keystroke with debounce
+            // Drag events
             card.addEventListener('dragstart', e => {
-                // Don't allow drag when editing notes
-                const active = document.activeElement;
-                if (active && active.tagName === 'TEXTAREA') { e.preventDefault(); return; }
-                draggedId = task.id; card.classList.add('dragging');
+                draggedId = task.id;
+                card.classList.add('dragging');
             });
-            card.addEventListener('dragend', () => { draggedId = null; card.classList.remove('dragging'); });
+            card.addEventListener('dragend', () => {
+                draggedId = null;
+                card.classList.remove('dragging');
+            });
 
             body.appendChild(card);
-
-            // Attach note save handler after appended to DOM
-            const textarea = card.querySelector(`#notes-input-${task.id}`);
-            let saveTimer = null;
-            textarea.addEventListener('input', () => {
-                clearTimeout(saveTimer);
-                saveTimer = setTimeout(() => {
-                    notes[task.id] = textarea.value;
-                    saveNotes();
-                    const savedEl = document.getElementById(`notes-saved-${task.id}`);
-                    savedEl.classList.add('show');
-                    setTimeout(() => savedEl.classList.remove('show'), 1500);
-                    // Update the toggle label
-                    const toggle = card.querySelector(`[data-toggle="${task.id}"]`);
-                    const hasN = textarea.value.trim().length > 0;
-                    const nLines = textarea.value.trim().split('\n').filter(l => l.trim()).length;
-                    toggle.innerHTML = `
-                        <span class="note-icon">${hasN ? '📝' : '📋'}</span>
-                        <span>${hasN ? 'Notes' : 'Add note'}</span>
-                        ${hasN ? `<span class="note-count">${nLines}</span>` : ''}
-                    `;
-                }, 400);
-            });
-            // Prevent drag while typing
-            textarea.addEventListener('mousedown', e => e.stopPropagation());
         });
 
         col.appendChild(body);
         board.appendChild(col);
     });
+
+    // Attach note save handlers
+    document.querySelectorAll('.card-notes-area textarea').forEach(textarea => {
+        let timeout;
+        textarea.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                const taskId = parseInt(textarea.dataset.taskId);
+                const noteText = textarea.value;
+                notes[taskId] = noteText;
+                saveNote(taskId, noteText);
+                const savedEl = document.getElementById(`notes-saved-${taskId}`);
+                if (savedEl) {
+                    savedEl.classList.add('show');
+                    setTimeout(() => savedEl.classList.remove('show'), 1500);
+                }
+            }, 500);
+        });
+    });
 }
 
-populateFilters();
-render();
+// ============================================
+// INIT
+// ============================================
+loadFromFirebase();
 </script>
+
 </body>
 </html>
